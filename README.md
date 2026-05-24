@@ -82,7 +82,7 @@ python uestc_eams_helper.py
 
 本仓库当前是 **Python 脚本**
 
-若你是 **UESTC 在校生**，有兴趣参与 **安卓 App** 或脚本改进，欢迎 **Fork**
+若你是 **UESTC 在校生**，有兴趣参与 **安卓 App** 或 **脚本改进**，欢迎 **Fork**
 
 **Python 代码** 我用了 **Oxygen 注释**，所以应该是 不难看懂 的，实在不行的话问一下 **LLM**（）
 
