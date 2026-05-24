@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 登录缓存（含 JWT，勿提交）
+session_cookies.json
+
+# 查询结果（含个人课表/成绩/考试，勿提交）
+timetable.json
+grades.json
+exam.json
+all.json
+
+# 调试产物
+debug_*
+*.log
+
+# 密钥 / 环境变量
+.env
+.env.*
