@@ -131,8 +131,9 @@ def read_login_credentials() -> Tuple[str, str]:
         return username, password
     if not sys.stdin.isatty():
         print(
-            "❌ 非交互环境未设置账号口令：请设置环境变量 UESTC_USERNAME、UESTC_PASSWORD，"
-            "或在 PowerShell/CMD 终端直接运行本脚本以手动输入。"
+            "❌ 非交互环境未设置学号密码：请在终端直接运行本脚本手动输入，"
+            "或通过环境变量传入后再试。",
+            file=sys.stderr,
         )
         sys.exit(1)
     print("\n—— 统一身份认证：请输入账号密码——")
@@ -256,7 +257,7 @@ def _save_session_cookies_to_file(session: requests.Session, path: str) -> None:
         json.dump(recs, f, ensure_ascii=False, indent=2)
     if not recs:
         if DEBUG_VERBOSE:
-            print(f"⚠️ 未能写入 Cookie 快照（Session 为空）：{path}", file=sys.stderr)
+            print(f"⚠️ 未能保存登录状态（内容为空）", file=sys.stderr)
         return
 def _load_session_cookies_from_file(session: requests.Session, path: str) -> int:
     """从 JSON 恢复 Cookie，返回条目数。"""
@@ -304,7 +305,7 @@ def _eams_browser_headers(referer: Optional[str] = None) -> Dict[str, str]:
 def _reauth_submit_response_summary(r: requests.Response) -> str:
     """调试：二次认证提交结果摘要。"""
     if r.status_code != 200:
-        return f"HTTP {r.status_code}"
+        return f"响应异常 {r.status_code}"
     try:
         p = r.json()
     except (json.JSONDecodeError, ValueError):
@@ -320,12 +321,11 @@ def _print_cas_login_chain_summary(r: requests.Response, label: str) -> None:
     """打印整页 GET login 的终点与最近几条重定向（路径截断，避免刷屏）。"""
     if not DEBUG_VERBOSE:
         return
-    print(f"  {label}: HTTP {r.status_code} {_url_path_only(r.url or '')}")
+    print(f"  调试 {label}: 响应 {r.status_code}", file=sys.stderr)
     hops = list(r.history)[-5:]
     for h in hops:
-        loc = h.headers.get("Location") or ""
-        if loc:
-            print(f"    ← {h.status_code} {_url_path_only(loc)}")
+        if h.headers.get("Location"):
+            print(f"    ← {h.status_code}", file=sys.stderr)
 def _consume_cas_service_ticket_url(
     session: requests.Session, ticket_page_url: str, cas_login_page_url: str
 ) -> None:
@@ -408,7 +408,7 @@ def _ensure_multifactor_fingerprint(session: requests.Session, referer: str) -> 
             )
         )
         if DEBUG_VERBOSE:
-            print("  → 已生成设备指纹并完成 bfp/info")
+            print("  → 已生成设备指纹", file=sys.stderr)
     xhr = _xhr_headers(referer)
     ts = int(time.time() * 1000)
     session.get(
@@ -449,9 +449,7 @@ def _debug_log_reauth_send_hints(html: str) -> None:
         if len(hints) >= 12:
             break
     if hints:
-        print("  ℹ️「发送验证码」相关 URL（自页面 HTML 扫描，需在浏览器里核对方法与参数）:")
-        for p in hints:
-            print(f"     · {p}")
+        print("  调试: 页面里存在多个可能的发验证码入口，将尝试自动发送。", file=sys.stderr)
     else:
         print(
             "  ℹ️ 页面里未找到明显的发验证码接口；"
@@ -559,9 +557,9 @@ def _trigger_reauth_send_code_if_configured(
         else:
             r = session.post(url, headers=xhr, data="", timeout=30)
         if DEBUG_VERBOSE:
-            print(f"  [VERBOSE] 自定义发码 {method} {url!r} → HTTP {r.status_code}")
+            print(f"  调试: 自定义发码 {method} 响应 {r.status_code}", file=sys.stderr)
         if r.status_code != 200:
-            return None, False, f"HTTP {r.status_code}"
+            return None, False, "服务器响应异常"
         try:
             payload = r.json()
             if isinstance(payload, dict):
@@ -571,7 +569,7 @@ def _trigger_reauth_send_code_if_configured(
             pass
         if DEBUG_VERBOSE and (r.text or ""):
             preview = (r.text or "")[:200].replace("\n", " ")
-            print(f"     响应预览: {preview!r}")
+            print(f"     调试: 响应摘要 {preview!r}", file=sys.stderr)
         return None, None, ""
 
     uid, rt = _parse_reauth_params_from_html(html)
@@ -590,9 +588,9 @@ def _trigger_reauth_send_code_if_configured(
     r = session.post(url, headers=headers, data=data, timeout=30)
     if DEBUG_VERBOSE:
         preview = (r.text or "")[:400].replace("\n", " ")
-        print(f"  [VERBOSE] getDynamicCodeByReauth HTTP {r.status_code}: {preview!r}")
+        print(f"  调试: 发码接口响应 {r.status_code}", file=sys.stderr)
     if r.status_code != 200:
-        return None, False, f"HTTP {r.status_code}"
+        return None, False, "服务器响应异常"
     try:
         payload = r.json()
         if isinstance(payload, dict):
@@ -600,7 +598,7 @@ def _trigger_reauth_send_code_if_configured(
     except (json.JSONDecodeError, ValueError):
         if DEBUG_VERBOSE and (r.text or ""):
             preview = (r.text or "")[:400].replace("\n", " ")
-            print(f"     响应(非JSON): {preview!r}")
+            print(f"     调试: 响应摘要 {preview!r}", file=sys.stderr)
     return None, None, ""
 def _prompt_reauth_user_input(dynamic_preset: str) -> str:
     """交互或使用环境变量 UESTC_REAUTH_DYNAMIC_CODE。"""
@@ -609,7 +607,7 @@ def _prompt_reauth_user_input(dynamic_preset: str) -> str:
         if not d:
             d = input("短信验证码: ").strip()
     elif not d:
-        print("  非交互环境请设置 UESTC_REAUTH_DYNAMIC_CODE。")
+        print("  非交互环境请设置短信验证码后重试，或在终端交互运行。", file=sys.stderr)
     return d
 def _report_reauth_sms_send(
     mob: Optional[str], send_ok: Optional[bool], detail: str
@@ -630,7 +628,7 @@ def _report_reauth_sms_send(
         tail = f"，{detail}" if detail else ""
         print(f"  短信验证码：发送失败{tail}")
     elif detail and DEBUG_VERBOSE:
-        print(f"  [VERBOSE] 发码: {detail}")
+        print(f"  调试: 发码 {detail}", file=sys.stderr)
 def complete_idas_reauth(session: requests.Session, reauth_page_url: str) -> bool:
     """完成短信二次认证：发码 → 输入验证码 → 提交。"""
     referer = reauth_page_url.split("#")[0]
@@ -726,11 +724,10 @@ def complete_idas_reauth(session: requests.Session, reauth_page_url: str) -> boo
         timeout=60,
     )
     if DEBUG_VERBOSE:
-        preview = (r_submit.text or "")[:400].replace("\n", " ")
-        print(f"     reAuthSubmit 响应 {r_submit.status_code}: {preview!r}")
+        print(f"  调试: 二次认证提交响应 {r_submit.status_code}", file=sys.stderr)
 
     if r_submit.status_code != 200:
-        print(f"  ❌ 二次认证提交失败 HTTP {r_submit.status_code}")
+        print("  ❌ 二次认证提交失败，请稍后重试。")
         return False
 
     try:
@@ -741,7 +738,7 @@ def complete_idas_reauth(session: requests.Session, reauth_page_url: str) -> boo
                 print(f"  ❌ 二次认证失败: {fail_msg}")
                 return False
             if DEBUG_VERBOSE:
-                print(f"  [VERBOSE] reAuthSubmit: {payload!r}")
+                print(f"  调试: 二次认证提交 {payload!r}", file=sys.stderr)
     except (json.JSONDecodeError, ValueError):
         raw = (r_submit.text or "").strip()
         low = raw.lower()
@@ -755,7 +752,7 @@ def complete_idas_reauth(session: requests.Session, reauth_page_url: str) -> boo
             return False
 
     if DEBUG_VERBOSE:
-        print(f"  reAuthSubmit 摘要: {_reauth_submit_response_summary(r_submit)}")
+        print(f"  调试: {_reauth_submit_response_summary(r_submit)}", file=sys.stderr)
 
     service_q = urllib.parse.quote(service, safe="")
     login_after = f"{CAS_BASE_URL}/login?service={service_q}"
@@ -797,11 +794,18 @@ def complete_idas_reauth(session: requests.Session, reauth_page_url: str) -> boo
     if online_ok:
         return True
 
+    ticket_url = find_eamsapp_ticket_url(session)
+    if ticket_url and consume_eamsapp_cas_ticket(session, ticket_url):
+        return True
+    if _pick_jwt_jsessionid_from_session(session):
+        return True
+
     print(
-        "  ℹ️ 二次认证已提交成功；"
-        "正在继续完成登录并连接移动教务站点。"
+        "  ❌ 短信验证已通过，但未能连接移动教务站点。"
+        "请删除 session_cookies.json 后重试。",
+        file=sys.stderr,
     )
-    return True
+    return False
 
 
 def cas_login(session: requests.Session, username: str, password: str) -> bool:
@@ -812,9 +816,8 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
     response = session.get(cas_login_url, headers=HEADERS, allow_redirects=True)
 
     if DEBUG_VERBOSE:
-        print(f"\n=== 调试信息 VERBOSE ===")
-        print(f"统一身份登录页: {cas_login_url}")
-        print(f"最终URL: {response.url}，HTTP {response.status_code}，{len(response.text)} 字节")
+        print(f"\n=== 调试信息 ===", file=sys.stderr)
+        print(f"打开登录页，响应 {response.status_code}", file=sys.stderr)
 
     # 若本地已有旧会话，可能直接跳进其它门户站，需判断是否仍有效
     fin0 = response.url or ""
@@ -830,7 +833,8 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
         response = session.get(cas_login_url, headers=HEADERS, allow_redirects=True)
         if DEBUG_VERBOSE:
             print(
-                f"  [登录] 重试 GET 登录页 终址={response.url!r} HTTP={response.status_code}"
+                f"  调试: 重试打开登录页，响应 {response.status_code}",
+                file=sys.stderr,
             )
 
     # 旧 Cookie 可能跳过密码页；无效则清空后重新打开登录页
@@ -845,7 +849,7 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
         session.cookies.clear()
         response = session.get(cas_login_url, headers=HEADERS, allow_redirects=True)
         if DEBUG_VERBOSE:
-            print(f"  [登录] 重试 GET 登录页 终址={response.url!r} HTTP={response.status_code}")
+            print(f"  调试: 重试打开登录页，响应 {response.status_code}", file=sys.stderr)
 
     login_html = response.text
 
@@ -856,7 +860,7 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
             return True
         print(
             "❌ 清除 Cookie 后仍无法完成登录。"
-            "请设置 UESTC_FRESH_LOGIN=1 重试，或粘贴浏览器 Cookie。"
+            "请删除 session_cookies.json 后重试，或从浏览器粘贴 Cookie。"
         )
         return False
 
@@ -868,7 +872,7 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
             return True
         print(
             "❌ 清除 Cookie 后仍无法完成登录。"
-            "请设置 UESTC_FRESH_LOGIN=1 重试，或粘贴浏览器 Cookie。"
+            "请删除 session_cookies.json 后重试，或从浏览器粘贴 Cookie。"
         )
         return False
 
@@ -889,11 +893,11 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
     if not execution:
         print("❌ 错误：无法读取登录页必要参数")
         if DEBUG_VERBOSE:
-            print(f"   [VERBOSE] execution 页 HTML 前2000字:\n{login_html[:2000]}...")
+            print(f"   调试: 登录页 HTML 前2000字:\n{login_html[:2000]}...", file=sys.stderr)
         return False
 
     if DEBUG_VERBOSE:
-        print(f"✅ execution: {execution[:30]}…")
+        print(f"✅ 已读取登录表单参数", file=sys.stderr)
 
     if DEBUG_VERBOSE:
         print("\n正在检查验证码状态...")
@@ -911,7 +915,7 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
     try:
         encrypted_password, enc_method = encrypt_login_password(login_html, password)
         if DEBUG_VERBOSE:
-            print(f"✅ 密码加密完成，方式 {enc_method}")
+            print("✅ 密码已加密", file=sys.stderr)
     except RuntimeError as e:
         print(f"❌ {e}")
         return False
@@ -944,7 +948,8 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
     
     if DEBUG_VERBOSE:
         print(
-            f"\n=== 登录 POST 后: {login_response.url!r} HTTP {login_response.status_code} ==="
+            f"\n=== 登录提交后，响应 {login_response.status_code} ===",
+            file=sys.stderr,
         )
     
     url_final = login_response.url
@@ -954,9 +959,8 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
         if complete_idas_reauth(session, url_final):
             _login_success_msg_debug_only()
             return True
-        print("\n❌ 二次认证未完成")
         if DEBUG_VERBOSE:
-            print(f"   {url_final!r}\n{body[:400]}…")
+            print(f"   调试: 登录未完成，页面摘要:\n{body[:400]}…", file=sys.stderr)
         return False
 
     if "ticket=" in url_final.lower():
@@ -970,7 +974,7 @@ def cas_login(session: requests.Session, username: str, password: str) -> bool:
         "\n❌ 登录未完成：请检查学号密码，或删除 session_cookies.json 后重试。"
     )
     if DEBUG_VERBOSE:
-        print(f"页面内容前500字:\n{body[:500]}...")
+        print(f"调试: 登录未完成，页面摘要:\n{body[:500]}...", file=sys.stderr)
     return False
 
 def _cookie_retry_disabled() -> bool:
@@ -1057,7 +1061,7 @@ def clear_session_cookies_snapshot() -> bool:
     try:
         os.remove(p)
     except OSError as ex:
-        print(f"⚠️ 无法删除 Cookie 快照 {p}: {ex}", file=sys.stderr)
+        print(f"⚠️ 无法删除 Cookie 快照: {ex}", file=sys.stderr)
         return False
     print(f"🗑 已清除 {COOKIE_SNAPSHOT_FILENAME}，将重新登录。", flush=True)
     return True
@@ -1218,16 +1222,17 @@ def consume_eamsapp_cas_ticket(
     hdr = _cas_nav_headers(referer=referer)
     jwt = ""
     landing = ""
+    hop_count = 0
     for _ in range(25):
+        hop_count += 1
         r = session.get(url, headers=hdr, allow_redirects=False, timeout=60)
         loc = r.headers.get("Location") or ""
         if loc:
             loc = urllib.parse.urljoin(str(r.url), loc)
-            j, uid, roles = _parse_cas_landing_query(loc)
+            j, _uid, _roles = _parse_cas_landing_query(loc)
             if j:
                 jwt = j
-                if uid or roles or "jsessionid" in loc.lower():
-                    landing = loc
+                landing = loc
         if jwt and landing:
             break
         if r.status_code in (301, 302, 303, 307, 308) and loc:
@@ -1235,6 +1240,11 @@ def consume_eamsapp_cas_ticket(
             hdr = _cas_nav_headers(referer=str(r.url))
             continue
         break
+    if DEBUG_VERBOSE and not jwt and hop_count:
+        print(
+            f"  调试: 移动教务登录经过 {hop_count} 次跳转仍未完成",
+            file=sys.stderr,
+        )
     if jwt and landing:
         session.cookies.set("JSESSIONID", jwt, domain=_EAMSAPP_HOST, path="/")
         session.get(landing, headers=_cas_nav_headers(referer=referer), timeout=60, allow_redirects=True)
@@ -1288,7 +1298,11 @@ def establish_eamsapp_session_via_cas(
         sys.exit(1)
     jwt = consume_eamsapp_cas_ticket(sess, ticket_url)
     if not jwt:
-        print("❌ 登录失败，未能建立有效会话。", file=sys.stderr)
+        print(
+            "❌ 统一身份与短信验证已通过，但未能完成移动教务登录。"
+            "请删除 session_cookies.json 后重试。",
+            file=sys.stderr,
+        )
         sys.exit(1)
     ck = compose_eamsapp_session_cookie(sess, jwt)
     return sess, ck
@@ -1315,7 +1329,7 @@ def cookie_header_from_requests_session(sess: requests.Session) -> str:
     if hdr:
         return hdr
     print(
-        "会话里没有可用的 JSESSIONID（移动 API 令牌）。"
+        "未能取得移动教务登录状态。"
         "请完成统一身份登录，或删除 session_cookies.json 后重试。",
         file=sys.stderr,
     )
@@ -1361,8 +1375,7 @@ def blade_auth_bearer_from_cookie(cookie_hdr: str) -> str:
         return tok
     if _debug_stderr_enabled():
         print(
-            "⚠️ Cookie 中缺少有效的登录令牌，且未设置备用令牌环境变量；"
-            "请重新登录。",
+            "⚠️ 登录状态不完整，请重新登录。",
             file=sys.stderr,
         )
     return ""
@@ -1676,7 +1689,7 @@ def fetch_eamsapp_semester_cur_week(cookie_hdr: str, semester_code: str) -> Opti
     except json.JSONDecodeError:
         pass
     if _debug_stderr_enabled():
-        print(f"⚠️ getCurWeek 解析失败 HTTP {r.status_code} body[:160]={txt[:160]!r}", file=sys.stderr)
+        print(f"⚠️ 当前周次解析失败，响应 {r.status_code}", file=sys.stderr)
     return None
 
 
@@ -1691,7 +1704,7 @@ def fetch_eamsapp_cur_semester_code(cookie_hdr: str) -> Optional[str]:
     except json.JSONDecodeError:
         pass
     if _debug_stderr_enabled():
-        print(f"⚠️ getCurSemester 解析学期编码失败 HTTP {r.status_code}", file=sys.stderr)
+        print(f"⚠️ 当前学期解析失败，响应 {r.status_code}", file=sys.stderr)
     return None
 
 
@@ -1705,8 +1718,8 @@ def default_student_table_code(cookie_hdr: str) -> str:
     if isinstance(uid, str) and uid.strip():
         return uid.strip()
     print(
-        "无法从当前登录状态解析学号。\n"
-        "请使用统一身份登录或粘贴浏览器 Cookie，或设置环境变量 UESTC_EAMSAPP_STUDENT_CODE。",
+        "无法从当前登录状态解析学号。"
+        "请重新登录，或在环境变量中手动指定学号。",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -1719,7 +1732,7 @@ def resolved_semester_code(cookie_hdr: str) -> str:
     got = fetch_eamsapp_cur_semester_code(cookie_hdr)
     if got:
         if DEBUG_VERBOSE:
-            print(f"[调试] getCurSemester → 学期编码={got!r}", file=sys.stderr)
+            print(f"调试: 当前学期编码 {got!r}", file=sys.stderr)
         return got
     if DEBUG_VERBOSE:
         print("⚠️ 未得到有效学期编码，沿用默认值。", file=sys.stderr)
@@ -1733,7 +1746,7 @@ def default_week(cookie_hdr: str, semester_code: str) -> str:
     cur = fetch_eamsapp_semester_cur_week(cookie_hdr, semester_code)
     if cur is not None:
         if DEBUG_VERBOSE:
-            print(f"[调试] getCurWeek → week={cur}", file=sys.stderr)
+            print(f"调试: 当前周次 {cur}", file=sys.stderr)
         return str(cur)
     if DEBUG_VERBOSE:
         print("⚠️ 未得到有效周次，沿用默认值。", file=sys.stderr)
@@ -1955,7 +1968,7 @@ def resolve_mode() -> str:
 
     if env_mode in {"timetable", "grades", "exam", "all"}:
         return env_mode
-    print("非交互终端请设置 UESTC_EAMSAPP_MODE（或用中文：课表/成绩/考试/全部）。", file=sys.stderr)
+    print("非交互终端请先指定查询内容：课表、成绩、考试或全部。", file=sys.stderr)
     sys.exit(2)
 
 
