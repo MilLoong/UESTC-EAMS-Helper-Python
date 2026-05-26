@@ -76,6 +76,7 @@ python uestc_eams_helper.py
 ## 后续计划
 
 - 基于 **本脚本导出的 JSON**，做 **安卓端 App** 展示（**课表 / 成绩 / 考试分栏、样式优化** 等）
+  > 目前已经做好，在 https://github.com/MilLoong/UESTC-EAMS-Helper-App
 - 有想法可先开 **Issue** 讨论，不必一开始就写代码
 
 ## 参与开发（欢迎 Fork）
