@@ -42,7 +42,7 @@ python uestc_eams_helper.py
 
 登录成功后，Cookie 会写入**当前目录**的 `session_cookies.json`。上述 JSON 均在 `.gitignore` 中，**请勿提交到 Git**。
 
-若 Cookie 过期，脚本会自动删除 `session_cookies.json` 并重新登录（最多重试一次）；也可手动删除该文件后重跑。
+若 Cookie 过期（这种情况下一般出现在 **在 脚本 中登录后，浏览器 又登录了一个，这时候就会过期，因为不能同时登多个账号**），脚本会自动删除 `session_cookies.json` 并重新登录（最多重试一次）；也可手动删除该文件后重跑。
 
 ## 非交互 / 自动化
 
