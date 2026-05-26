@@ -1803,8 +1803,8 @@ def _get_cur_semester_url() -> str:
 # 课表 / 成绩 / 考试：请求接口并输出 JSON
 # -------------------------------------------------------------------------
 
-def _api_json_from_response(r: requests.Response) -> Any:
-    """解析接口 JSON，提取 data 等业务字段。"""
+def _api_response_envelope(r: requests.Response) -> Any:
+    """解析接口 JSON，保留 code、success、data、msg 等完整字段。"""
     txt = (getattr(r, "text", "") or "").strip()
     if r.status_code >= 400:
         err: Dict[str, Any] = {"error": True, "httpStatus": r.status_code}
@@ -1817,12 +1817,34 @@ def _api_json_from_response(r: requests.Response) -> Any:
     if not txt:
         return None
     try:
-        obj = json.loads(txt)
+        return json.loads(txt)
     except json.JSONDecodeError:
         return {"error": True, "message": txt[:500]}
+
+
+def _api_json_from_response(r: requests.Response) -> Any:
+    """解析接口 JSON，提取 data 等业务字段（课表等内部逻辑用）。"""
+    obj = _api_response_envelope(r)
+    if isinstance(obj, dict) and obj.get("error"):
+        return obj
     if isinstance(obj, dict) and obj.get("success") is False:
         return obj
     return unwrap_blade_like_root(obj)
+
+
+def _merge_primary_api_payload(
+    primary: requests.Response, extras: Dict[str, Any]
+) -> Any:
+    """主接口响应置于顶层，辅助接口挂在附加字段下。"""
+    body = _api_response_envelope(primary)
+    if not isinstance(body, dict) or body.get("error"):
+        out: Dict[str, Any] = {"主接口": body}
+        out.update(extras)
+        return out
+    payload: Dict[str, Any] = dict(body)
+    for key, resp in extras.items():
+        payload[key] = _api_response_envelope(resp)
+    return payload
 
 
 def _fetch_api(ck: str, url: str) -> requests.Response:
@@ -1859,24 +1881,22 @@ def _collect_timetable(ck: str) -> Tuple[List[requests.Response], Any]:
     return [r], _api_json_from_response(r)
 
 
-def _collect_grades(ck: str) -> Tuple[List[requests.Response], Dict[str, Any]]:
+def _collect_grades(ck: str) -> Tuple[List[requests.Response], Any]:
     r_types = _fetch_api(ck, _course_type_list_url())
     r_grades = _fetch_api(ck, _grade_student_url(ck))
-    return [r_types, r_grades], {
-        "课程类型": _api_json_from_response(r_types),
-        "成绩": _api_json_from_response(r_grades),
-    }
+    return [r_types, r_grades], _merge_primary_api_payload(
+        r_grades, {"课程类型列表": r_types}
+    )
 
 
-def _collect_exam(ck: str) -> Tuple[List[requests.Response], Dict[str, Any]]:
+def _collect_exam(ck: str) -> Tuple[List[requests.Response], Any]:
     r_sem = _fetch_api(ck, _get_cur_semester_url())
     r_types = _fetch_api(ck, _exam_type_url())
     r_query = _fetch_api(ck, _exam_take_query_url(ck))
-    return [r_sem, r_types, r_query], {
-        "当前学期": _api_json_from_response(r_sem),
-        "考试类型": _api_json_from_response(r_types),
-        "考试安排": _api_json_from_response(r_query),
-    }
+    return [r_sem, r_types, r_query], _merge_primary_api_payload(
+        r_query,
+        {"当前学期": r_sem, "考试类型": r_types},
+    )
 
 
 def _responses_auth_failed(responses: List[requests.Response]) -> bool:
@@ -1900,7 +1920,7 @@ def _run_mode(mode: str, ck: str) -> Tuple[str, List[requests.Response]]:
         responses.extend(rs)
         rs, exam = _collect_exam(ck)
         responses.extend(rs)
-        payload = {"课表": timetable, **grades, **exam}
+        payload = {"课表": timetable, "成绩": grades, "考试": exam}
     else:
         return ck, responses
 
